@@ -114,11 +114,13 @@ except FileNotFoundError:
         beautified_course_info = beautified_course_info.replace("\n \n", "\n") # remove lines containing only a space
 
         course["ects_length"] = len(beautified_course_info)
+        course["ects_text"] = beautified_course_info
 
     with open('all_courses_extended.pickle', 'wb') as f:
         pickle.dump(all_courses, f)
 
 import pandas as pd
+import matplotlib.pyplot as plt
 import openpyxl as xl
 
 df = pd.DataFrame(all_courses)
@@ -126,4 +128,7 @@ df.to_excel("dutch_courses_ects_length.xlsx")
 
 df = df[["faculty", "ects_length"]]
 df = df.groupby("faculty").mean()
+df.sort_values(by="ects_length", inplace=True)
+df.plot(kind="bar")
+plt.show()
 print(df)
