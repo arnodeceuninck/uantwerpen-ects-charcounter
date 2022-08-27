@@ -130,6 +130,8 @@ def fetch_course_info(trajectories):
     num_success = 0  # number of successful requests
     num_total = 0  # totaal aantal vakken
 
+    # trajectories = trajectories[:3]  # Work with a shorter list for debugging, this line should be commented out
+
     # Itereer over alle opleidingen
     for trajectory in tqdm(trajectories):
 
@@ -262,9 +264,9 @@ def get_courses_info(courses):
             course["inhoud_length"] = len(inhoud)
 
             # En info over de evaluatievormen sectie (die begint met 6.Evaluatievormen)
-            evalutievormen = get_ects_section(parsed_html, 6)
-            course["evalutievormen"] = evalutievormen
-            course["evalutievormen_length"] = len(evalutievormen)
+            evaluatievormen = get_ects_section(parsed_html, 6)
+            course["evaluatievormen"] = evaluatievormen
+            course["evaluatievormen_length"] = len(evaluatievormen)
 
 
         except Exception as e:
@@ -279,8 +281,11 @@ def get_empty_ects_fiches(df):
     # Deze functie geeft een lijst terug van alle ects fiches in "df" die leeg zijn
     # Een ects fiche wordt gezien als leeg, als deze minder dan 524 karakters bevat (en dus enkel de titels)
 
+    # Maak een extra kolom die aangeeft of de fiche leeg is of niet (minder dan 524 tekens bij ects_length)
+    df["ects_empty"] = df["ects_length"] < 524
+
     # Krijg alle rijen met ects_length kleiner dan 524
-    empty_ects_fiches = df[df["ects_length"] < 524]
+    empty_ects_fiches = df[df["ects_empty"]]
     # Geef enkel relevante kolommen terug
     relevant_columns = ["year", "id", "faculty", "name", "page", "url_study_programme", "url_ects_fiche",
                         "ects_length", "ects_text"]
@@ -290,9 +295,10 @@ def get_empty_ects_fiches(df):
 def get_empty_contents_fiches(df):
     # Deze functie geeft een lijst terug van alle ects fiches waarvan het deel "inhoud" leeg is
     # De inhoud wordt gezien als leeg, als deze minder dan 14 karakters bevat
+    df["inhoud_empty"] = df["inhoud_length"] < 14
 
     # Krijg alle rijen met inhoud_length kleiner dan 524
-    empty_ects_fiches = df[df["inhoud_length"] < 14]
+    empty_ects_fiches = df[df["inhoud_empty"]]
     # Geef enkel relevante kolommen terug
     relevant_columns = ["year", "id", "faculty", "name", "page", "url_study_programme", "url_ects_fiche",
                         "ects_text", "inhoud", "inhoud_length"]
@@ -303,13 +309,22 @@ def get_empty_assessment_fiches(df):
     # Deze functie geeft een lijst terug van alle ects fiches waarvan het deel "evaluatievormen/assessment criteria"
     # leeg is
     # De evaluatievormen worden gezien als leeg, als deze minder dan 56 karakters bevat
+    df["evaluatievormen_empty"] = df["evaluatievormen_length"] < 56
 
     # Krijg alle rijen met evaluatievormen_length kleiner dan 56
-    empty_ects_fiches = df[df["evaluatievormen_length"] < 56]
+    empty_ects_fiches = df[df["evaluatievormen_empty"]]
     # Geef enkel relevante kolommen terug
     relevant_columns = ["year", "id", "faculty", "name", "page", "url_study_programme", "url_ects_fiche",
-                        "ects_text", "evaluativormen", "evaluatievormen_length"]
+                        "ects_text", "evaluatievormen", "evaluatievormen_length"]
     return empty_ects_fiches[relevant_columns]
+
+
+def get_problem_fiches(df):
+    # Make an extra column indicating whether one (or more) of the problems is true
+    df["problem"] = df["ects_empty"] | df["inhoud_empty"] | df["evaluatievormen_empty"] | df["not_found"]
+    relevant_columns = ["year", "id", "faculty", "name", "page", "url_study_programme", "url_ects_fiche", "ects_text",
+                        "ects_empty", "inhoud_empty", "evaluatievormen_empty", "not_found"]
+    return df[df["problem"]][relevant_columns]
 
 
 # Verzamel een lijst van alle richtingen
@@ -325,39 +340,59 @@ all_courses = load_pickle_or_get_from_function('all_courses_extended.pickle', ge
 df = pd.DataFrame(all_courses)
 
 # Maak een excel bestand aan om de verdere analyse in te zetten
-excel_writer = pd.ExcelWriter('ECTS Analyzer.xlsx')
+options = {'strings_to_formulas': False,
+           'strings_to_urls': False,
+           'if_sheet_exists': 'replace',
+           'index': False}
+excel_writer = pd.ExcelWriter('ECTS Analyzer.xlsx', engine='openpyxl')
 
 # Voeg een sheet toe van alle vakken waarvan de ects fiches niet bestaat
 # Zoek alle rijen met status_code 404 in df
-df_404 = df[df["status_code"] == 404]
-df_404.to_excel(excel_writer, sheet_name="Not found")
+df["not_found"] = df["ects_status_code"] == 404
+df_404 = df[df["not_found"]][["year", "id", "faculty", "name", "page", "url_study_programme", "url_ects_fiche"]]
+df_404.to_excel(excel_writer, sheet_name="Not found", index=False)
 
 # Gebruik voor de verdere verwerking alleen de vakken waarvan de ects fiche wel bestaat
-df = df[df["status_code"] == 200]
+df = df[df["ects_status_code"] == 200]
 
 # Voeg een sheet toe aan de excel met alle lege fiches
 empty_fiches = get_empty_ects_fiches(df)
-empty_fiches.to_excel(excel_writer, sheet_name='Empty')
+empty_fiches.to_excel(excel_writer, sheet_name='Empty', index=False)
 
 # Voeg een sheet toe met alle fiches waarvan de inhoud leeg is
 empty_fiches = get_empty_contents_fiches(df)
-empty_fiches.to_excel(excel_writer, sheet_name='Contents Empty')
+empty_fiches.to_excel(excel_writer, sheet_name='Contents Empty', index=False)
 
 # Voeg een sheet toe met alle fiches waarvan de evaluatievormen leeg is
 empty_fiches = get_empty_assessment_fiches(df)
-empty_fiches.to_excel(excel_writer, sheet_name='Assessment Empty')
+empty_fiches.to_excel(excel_writer, sheet_name='Assessment Empty', index=False)
+
+# Markeer alle fiches met een probleem en schrijf ze naar een aparte sheet
+problem_fiches = get_problem_fiches(df)
+problem_fiches.to_excel(excel_writer, sheet_name='Problems', index=False)
 
 # sort on ects_length
 df.sort_values(by=['ects_length'], inplace=True, ascending=True)
-df.to_excel(excel_writer, sheet_name='All')
+df.to_excel(excel_writer, sheet_name='All', index=False)
+
+# Save the excel file
+excel_writer.save()
 
 # Maak een grafiekje met de gemiddelde ects fiche lengt per faculteit
-df = df[["faculty", "ects_length"]]
-df = df.groupby("faculty").mean()
-df.sort_values(by="ects_length", inplace=True)
-df.plot(kind="bar")
+df_graph = df[["faculty", "ects_length"]]
+df_graph = df_graph.groupby("faculty").mean()
+df_graph.sort_values(by="ects_length", inplace=True)
+df_graph.plot(kind="bar", title="Average ECTS Fiche Length per Faculty")
 plt.show()
-print(df)
+print(df_graph)
+print()
+
+# Make a graph with relative frequencies of problems per faculty
+relative_problems_per_faculty = df.groupby("faculty")["problem"].mean()
+relative_problems_per_faculty.sort_values(inplace=True)
+relative_problems_per_faculty.plot(kind="bar", title="Relative Problems per Faculty")
+plt.show()
+print(relative_problems_per_faculty)
 
 #### example get course info ####
 # get_courses_info([{"href": "?id=2022-1071FOWARC&lang=nl"}])
