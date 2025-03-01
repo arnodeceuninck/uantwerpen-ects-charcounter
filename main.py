@@ -376,7 +376,7 @@ df.sort_values(by=['ects_length'], inplace=True, ascending=True)
 df.to_excel(excel_writer, sheet_name='All', index=False)
 
 # Save the excel file
-excel_writer.save()
+excel_writer.save() # TODO: find an alternative for this?
 
 # Maak een grafiekje met de gemiddelde ects fiche lengt per faculteit
 df_graph = df[["faculty", "ects_length"]]
